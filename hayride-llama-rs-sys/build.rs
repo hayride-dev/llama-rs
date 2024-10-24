@@ -40,7 +40,7 @@ fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let target_dir = manifest_dir.join("target").join(&profile);
 
-    let llama_cpp_src = manifest_dir.parent().expect("Failed to find manifest root dir").join("llama.cpp");
+    let llama_cpp_src = manifest_dir.join("llama.cpp");
     let llama_cpp_dst = out_dir.join("llama.cpp");
  
     let llama_lib_profile = env::var("LLAMA_LIB_PROFILE").unwrap_or("Release".to_string());
@@ -97,6 +97,7 @@ fn main() {
     config.define("LLAMA_BUILD_TESTS", "OFF");
     config.define("LLAMA_BUILD_EXAMPLES", "OFF");
     config.define("LLAMA_BUILD_SERVER", "OFF");
+    config.define("BUILD_SHARED_LIBS", "OFF");
 
     // set cmake config options
     config.profile(&profile)
