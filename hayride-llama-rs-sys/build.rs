@@ -42,12 +42,18 @@ fn main() {
 
     let llama_cpp_src = manifest_dir.join("llama.cpp");
     let llama_cpp_dst = out_dir.join("llama.cpp");
+
+    let build_shared_libs = cfg!(feature = "cuda") || cfg!(feature = "dynamic-link");
+    let build_shared_libs = std::env::var("LLAMA_BUILD_SHARED_LIBS")
+        .map(|v| v == "1")
+        .unwrap_or(build_shared_libs);
  
     let llama_lib_profile = env::var("LLAMA_LIB_PROFILE").unwrap_or("Release".to_string());
     let llama_static_crt = env::var("LLAMA_STATIC_CRT").map(|v| v == "1").unwrap_or(false);
 
     debug_log!("Arc Target: {}", target);
     debug_log!("Output Directory: {}", out_dir.display());
+    debug_log!("Build Shared: {}", build_shared_libs);
     debug_log!("Profile: {}", profile);
     debug_log!("Target Directory: {}", target_dir.display());
     debug_log!("Manifest Directory: {}", manifest_dir.display());
@@ -97,7 +103,14 @@ fn main() {
     config.define("LLAMA_BUILD_TESTS", "OFF");
     config.define("LLAMA_BUILD_EXAMPLES", "OFF");
     config.define("LLAMA_BUILD_SERVER", "OFF");
-    config.define("BUILD_SHARED_LIBS", "OFF");
+    config.define(
+        "BUILD_SHARED_LIBS",
+        if build_shared_libs { "ON" } else { "OFF" },
+    );
+
+    if cfg!(feature = "cuda") {
+        config.define("GGML_CUDA", "ON");
+    }
 
     // set cmake config options
     config.profile(&profile)
@@ -111,8 +124,20 @@ fn main() {
     println!("cargo:rustc-link-search={}", build_dir.display());
 
     // Link libraries 
-    let llama_libs_kind =  "static";
-    let lib_pattern = "*.a";
+    let llama_libs_kind = if build_shared_libs { "dylib" } else { "static" };
+    let lib_pattern = if cfg!(windows) {
+        "*.lib"
+    } else if cfg!(target_os = "macos") {
+        if build_shared_libs {
+            "*.dylib"
+        } else {
+            "*.a"
+        }
+    } else if build_shared_libs {
+        "*.so"
+    } else {
+        "*.a"
+    };
 
     let libs_dir = out_dir.join("lib");
     let pattern = libs_dir.join(lib_pattern);
@@ -140,5 +165,63 @@ fn main() {
         println!("cargo:rustc-link-lib=framework=MetalKit");
         println!("cargo:rustc-link-lib=framework=Accelerate");
         println!("cargo:rustc-link-lib=c++");
+    }
+
+    // Linux
+    if cfg!(target_os = "linux") {
+        println!("cargo:rustc-link-lib=dylib=stdc++");
+    }
+
+     // copy DLLs to target
+     if build_shared_libs {
+        let shared_lib_pattern = if cfg!(windows) {
+            "*.dll"
+        } else if cfg!(target_os = "macos") {
+            "*.dylib"
+        } else {
+            "*.so"
+        };
+
+        let shared_libs_dir = if cfg!(windows) { "bin" } else { "lib" };
+        let libs_dir = out_dir.join(shared_libs_dir);
+        let pattern = libs_dir.join(shared_lib_pattern);
+        debug_log!("Extract lib assets {}", pattern.display());
+        let mut libs_assets = Vec::new();
+
+        for entry in glob(pattern.to_str().unwrap()).unwrap() {
+            match entry {
+                Ok(path) => {
+                    libs_assets.push(path);
+                }
+                Err(e) => eprintln!("cargo:warning=error={}", e),
+            }
+        }
+
+        for asset in libs_assets {
+            let asset_clone = asset.clone();
+            let filename = asset_clone.file_name().unwrap();
+            let filename = filename.to_str().unwrap();
+            let dst = target_dir.join(filename);
+            debug_log!("HARD LINK {} TO {}", asset.display(), dst.display());
+            if !dst.exists() {
+                std::fs::hard_link(asset.clone(), dst).unwrap();
+            }
+
+            // Copy DLLs to examples as well
+            if target_dir.join("examples").exists() {
+                let dst = target_dir.join("examples").join(filename);
+                debug_log!("HARD LINK {} TO {}", asset.display(), dst.display());
+                if !dst.exists() {
+                    std::fs::hard_link(asset.clone(), dst).unwrap();
+                }
+            }
+
+            // Copy DLLs to target/profile/deps as well for tests
+            let dst = target_dir.join("deps").join(filename);
+            debug_log!("HARD LINK {} TO {}", asset.display(), dst.display());
+            if !dst.exists() {
+                std::fs::hard_link(asset.clone(), dst).unwrap();
+            }
+        }
     }
 }

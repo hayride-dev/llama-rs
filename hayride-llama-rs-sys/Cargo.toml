@@ -55,3 +55,8 @@ include = [
 bindgen = "0.70.1"
 cmake = "0.1.51"
 glob = "0.3.1"
+
+[features]
+cuda = []
+metal = []
+dynamic-link = []
