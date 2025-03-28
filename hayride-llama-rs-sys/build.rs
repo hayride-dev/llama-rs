@@ -32,6 +32,22 @@ fn copy_dir_all(src: &Path, dst: &Path) -> io::Result<()> {
     Ok(())
 }
 
+fn get_cargo_target_dir() -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
+    let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR")?);
+    let profile = std::env::var("PROFILE")?;
+    let mut target_dir = None;
+    let mut sub_path = out_dir.as_path();
+    while let Some(parent) = sub_path.parent() {
+        if parent.ends_with(&profile) {
+            target_dir = Some(parent);
+            break;
+        }
+        sub_path = parent;
+    }
+    let target_dir = target_dir.ok_or("not found")?;
+    Ok(target_dir.to_path_buf())
+}
+
 fn main() {
     // get build envs 
     let target = env::var("TARGET").unwrap();
@@ -172,8 +188,11 @@ fn main() {
         println!("cargo:rustc-link-lib=dylib=stdc++");
     }
 
-     // copy DLLs to target
-     if build_shared_libs {
+    let dest_dir = get_cargo_target_dir().unwrap();
+    println!("cargo:rustc-link-search={}", dest_dir.display());
+
+    // copy DLLs to target
+    if build_shared_libs {
         let shared_lib_pattern = if cfg!(windows) {
             "*.dll"
         } else if cfg!(target_os = "macos") {
@@ -201,14 +220,14 @@ fn main() {
             let asset_clone = asset.clone();
             let filename = asset_clone.file_name().unwrap();
             let filename = filename.to_str().unwrap();
-            let dst = target_dir.join(filename);
+            let dst = dest_dir.join(filename);
             debug_log!("HARD LINK {} TO {}", asset.display(), dst.display());
             if !dst.exists() {
                 std::fs::hard_link(asset.clone(), dst).unwrap();
             }
 
             // Copy DLLs to examples as well
-            if target_dir.join("examples").exists() {
+            if dest_dir.join("examples").exists() {
                 let dst = target_dir.join("examples").join(filename);
                 debug_log!("HARD LINK {} TO {}", asset.display(), dst.display());
                 if !dst.exists() {
@@ -217,7 +236,7 @@ fn main() {
             }
 
             // Copy DLLs to target/profile/deps as well for tests
-            let dst = target_dir.join("deps").join(filename);
+            let dst = dest_dir.join("deps").join(filename);
             debug_log!("HARD LINK {} TO {}", asset.display(), dst.display());
             if !dst.exists() {
                 std::fs::hard_link(asset.clone(), dst).unwrap();
