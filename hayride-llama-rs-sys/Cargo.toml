@@ -6,7 +6,7 @@ description = "Hayride llama.cpp rust bindings"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/hayride-dev/llama-rs"
-readme = "README.md"
+readme = "../README.md"
 
 include = [
     "wrapper.h",
