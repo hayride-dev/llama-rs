@@ -1,5 +1,6 @@
 use std::{env,fs,io};
 use std::path::{PathBuf, Path};
+use std::process::Command;
 
 use cmake::Config;
 use glob::glob;
@@ -46,6 +47,30 @@ fn get_cargo_target_dir() -> Result<std::path::PathBuf, Box<dyn std::error::Erro
     }
     let target_dir = target_dir.ok_or("not found")?;
     Ok(target_dir.to_path_buf())
+}
+
+fn macos_link_search_path() -> Option<String> {
+    let output = Command::new("clang")
+        .arg("--print-search-dirs")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        println!(
+            "failed to run 'clang --print-search-dirs', continuing without a link search path"
+        );
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        if line.contains("libraries: =") {
+            let path = line.split('=').nth(1)?;
+            return Some(format!("{}/lib/darwin", path));
+        }
+    }
+
+    println!("failed to determine link search path, continuing without it");
+    None
 }
 
 fn main() {
@@ -181,6 +206,15 @@ fn main() {
         println!("cargo:rustc-link-lib=framework=MetalKit");
         println!("cargo:rustc-link-lib=framework=Accelerate");
         println!("cargo:rustc-link-lib=c++");
+
+        // For older OSX link against clang
+        if target.ends_with("-apple-darwin") {
+            if let Some(path) = macos_link_search_path() {
+                println!("cargo:rustc-link-lib=clang_rt.osx");
+                println!("cargo:rustc-link-search={}", path);
+            }
+        }
+
     }
 
     // Linux
