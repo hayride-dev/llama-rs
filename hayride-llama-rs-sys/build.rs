@@ -143,6 +143,7 @@ fn main() {
     // for llama.cpp directly 
     config.define("LLAMA_BUILD_TESTS", "OFF");
     config.define("LLAMA_BUILD_EXAMPLES", "OFF");
+    config.define("LLAMA_BUILD_TOOLS", "OFF");
     config.define("LLAMA_BUILD_SERVER", "OFF");
     config.define(
         "BUILD_SHARED_LIBS",
