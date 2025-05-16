@@ -215,12 +215,15 @@ fn main() {
                 println!("cargo:rustc-link-search={}", path);
             }
         }
-
     }
 
     // Linux
     if cfg!(target_os = "linux") {
         println!("cargo:rustc-link-lib=dylib=stdc++");
+    }
+
+    if target.contains("gnu") {
+        println!("cargo:rustc-link-lib=gomp");
     }
 
     let dest_dir = get_cargo_target_dir().unwrap();
