@@ -133,6 +133,9 @@ fn main() {
         if build_shared_libs { "ON" } else { "OFF" },
     );
 
+    #[cfg(target_env = "msvc")]
+    config.define("CMAKE_MSVC_RUNTIME_LIBRARY", "MultiThreaded");
+
     if cfg!(feature = "cuda") {
         config.define("GGML_CUDA", "ON");
     }
