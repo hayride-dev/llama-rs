@@ -1,5 +1,5 @@
-use std::{env,fs,io};
-use std::path::{PathBuf, Path};
+use std::env;
+use std::path::PathBuf;
 use std::process::Command;
 
 use cmake::Config;
@@ -12,25 +12,6 @@ macro_rules! debug_log {
             println!("cargo:warning=[DEBUG] {}", format!($($arg)*));
         }
     };
-}
-
-fn copy_dir_all(src: &Path, dst: &Path) -> io::Result<()> {
-    if !dst.exists() {
-        fs::create_dir_all(dst)?;
-    }
-
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let path = entry.path();
-        let dest_path = dst.join(entry.file_name());
-
-        if path.is_dir() {
-            copy_dir_all(&path, &dest_path)?;
-        } else {
-            fs::copy(&path, &dest_path)?;
-        }
-    }
-    Ok(())
 }
 
 fn get_cargo_target_dir() -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
@@ -74,7 +55,7 @@ fn macos_link_search_path() -> Option<String> {
 }
 
 fn main() {
-    // get build envs 
+    // get build envs
     let target = env::var("TARGET").unwrap();
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let profile = env::var("PROFILE").unwrap(); // release/debug
@@ -82,15 +63,16 @@ fn main() {
     let target_dir = manifest_dir.join("target").join(&profile);
 
     let llama_cpp_src = manifest_dir.join("llama.cpp");
-    let llama_cpp_dst = out_dir.join("llama.cpp");
 
     let build_shared_libs = cfg!(feature = "cuda") || cfg!(feature = "dynamic-link");
     let build_shared_libs = std::env::var("LLAMA_BUILD_SHARED_LIBS")
         .map(|v| v == "1")
         .unwrap_or(build_shared_libs);
- 
+
     let llama_lib_profile = env::var("LLAMA_LIB_PROFILE").unwrap_or("Release".to_string());
-    let llama_static_crt = env::var("LLAMA_STATIC_CRT").map(|v| v == "1").unwrap_or(false);
+    let llama_static_crt = env::var("LLAMA_STATIC_CRT")
+        .map(|v| v == "1")
+        .unwrap_or(false);
 
     debug_log!("Arc Target: {}", target);
     debug_log!("Output Directory: {}", out_dir.display());
@@ -99,17 +81,12 @@ fn main() {
     debug_log!("Target Directory: {}", target_dir.display());
     debug_log!("Manifest Directory: {}", manifest_dir.display());
     debug_log!("Llama Cpp Src: {}", llama_cpp_src.display());
-    debug_log!("Llama Cpp Dst: {}", llama_cpp_dst.display());
     debug_log!("Llama Lib Profile: {}", llama_lib_profile);
     debug_log!("Llama Static CRT: {}", llama_static_crt);
 
-    // Copy llama_cpp_src directory to llama_cpp_dst
-    if !llama_cpp_dst.exists() {
-        copy_dir_all(&llama_cpp_src, &llama_cpp_dst).expect("Failed to copy llama.cpp source directory");
-    }
-
     // increase build speed of cmake
-    env::set_var("CMAKE_BUILD_PARALLEL_LEVEL",
+    env::set_var(
+        "CMAKE_BUILD_PARALLEL_LEVEL",
         std::thread::available_parallelism()
             .unwrap()
             .get()
@@ -119,43 +96,53 @@ fn main() {
     // bindings
     let bindings_path = out_dir.join("bindings.rs");
     let bindings = bindgen::Builder::default()
-            .header("wrapper.h")
-            .clang_arg(format!("-I{}", llama_cpp_dst.join("include").display()))
-            .clang_arg(format!("-I{}", llama_cpp_dst.join("ggml/include").display()))
-            .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-            .derive_partialeq(true)
-            .allowlist_function("ggml_.*")
-            .allowlist_type("ggml_.*")
-            .allowlist_function("llama_.*")
-            .allowlist_type("llama_.*")
-            .prepend_enum_name(false)
-            .generate()
-            .expect("Failed to generate bindings");
-    bindings.write_to_file(bindings_path).expect("Couldn't write bindings!");
-    
+        .header("wrapper.h")
+        .clang_arg(format!("-I{}", llama_cpp_src.join("include").display()))
+        .clang_arg(format!(
+            "-I{}",
+            llama_cpp_src.join("ggml/include").display()
+        ))
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .derive_partialeq(true)
+        .allowlist_function("ggml_.*")
+        .allowlist_type("ggml_.*")
+        .allowlist_function("llama_.*")
+        .allowlist_type("llama_.*")
+        .prepend_enum_name(false)
+        .generate()
+        .expect("Failed to generate bindings");
+    bindings
+        .write_to_file(bindings_path)
+        .expect("Couldn't write bindings!");
+
     debug_log!("Bindings Generated");
 
     // Build llama.cpp with cmake
-    let mut config = Config::new(&llama_cpp_dst);
+    let mut config = Config::new(&llama_cpp_src);
 
-    // skip extra compilation 
-    // TODO :: Create a Makefile that builds/kicks tests off 
-    // for llama.cpp directly 
+    // skip extra compilation
+    // TODO :: Create a Makefile that builds/kicks tests off
+    // for llama.cpp directly
     config.define("LLAMA_BUILD_TESTS", "OFF");
     config.define("LLAMA_BUILD_EXAMPLES", "OFF");
     config.define("LLAMA_BUILD_TOOLS", "OFF");
     config.define("LLAMA_BUILD_SERVER", "OFF");
+    config.define("LLAMA_CURL", "OFF");
     config.define(
         "BUILD_SHARED_LIBS",
         if build_shared_libs { "ON" } else { "OFF" },
     );
+
+    #[cfg(target_env = "msvc")]
+    config.define("CMAKE_MSVC_RUNTIME_LIBRARY", "MultiThreaded");
 
     if cfg!(feature = "cuda") {
         config.define("GGML_CUDA", "ON");
     }
 
     // set cmake config options
-    config.profile(&profile)
+    config
+        .profile(&profile)
         .very_verbose(true)
         .always_configure(false);
 
@@ -165,7 +152,7 @@ fn main() {
     println!("cargo:rustc-link-search={}", out_dir.join("lib").display());
     println!("cargo:rustc-link-search={}", build_dir.display());
 
-    // Link libraries 
+    // Link libraries
     let llama_libs_kind = if build_shared_libs { "dylib" } else { "static" };
     let lib_pattern = if cfg!(windows) {
         "*.lib"
@@ -181,7 +168,7 @@ fn main() {
         "*.a"
     };
 
-    let libs_dir = out_dir.join("lib");
+    let libs_dir = out_dir.join("lib*");
     let pattern = libs_dir.join(lib_pattern);
 
     debug_log!("Linking libraries from: {}", pattern.display());
@@ -194,8 +181,14 @@ fn main() {
                 // Remove the "lib" prefix if present
                 let lib_name = stem_str.strip_prefix("lib").unwrap_or(stem_str);
 
-                debug_log!("LINK {}",format!("cargo:rustc-link-lib={}={}", llama_libs_kind, lib_name));
-                println!("{}",format!("cargo:rustc-link-lib={}={}", llama_libs_kind, lib_name));
+                debug_log!(
+                    "LINK {}",
+                    format!("cargo:rustc-link-lib={}={}", llama_libs_kind, lib_name)
+                );
+                println!(
+                    "{}",
+                    format!("cargo:rustc-link-lib={}={}", llama_libs_kind, lib_name)
+                );
             }
             Err(e) => println!("cargo:warning=error={}", e),
         }
@@ -224,6 +217,11 @@ fn main() {
 
     if target.contains("gnu") {
         println!("cargo:rustc-link-lib=gomp");
+    }
+
+    // Windows
+    if cfg!(windows) {
+        println!("cargo:rustc-link-lib=advapi32");
     }
 
     let dest_dir = get_cargo_target_dir().unwrap();
