@@ -152,7 +152,7 @@ fn main() {
     // Link libraries
     let llama_libs_kind = if build_shared_libs { "dylib" } else { "static" };
     let lib_pattern = if cfg!(windows) {
-        "*.dll"
+        "*.lib"
     } else if cfg!(target_os = "macos") {
         if build_shared_libs {
             "*.dylib"
@@ -165,8 +165,7 @@ fn main() {
         "*.a"
     };
 
-    let shared_libs_dir = if cfg!(windows) { "bin" } else { "lib" };
-    let libs_dir = out_dir.join(shared_libs_dir);
+    let libs_dir = out_dir.join("lib*");
     let pattern = libs_dir.join(lib_pattern);
 
     debug_log!("Linking libraries from: {}", pattern.display());
@@ -215,6 +214,11 @@ fn main() {
 
     if target.contains("gnu") {
         println!("cargo:rustc-link-lib=gomp");
+    }
+
+    // Windows
+    if cfg!(windows) {
+        println!("cargo:rustc-link-lib=advapi32");
     }
 
     let dest_dir = get_cargo_target_dir().unwrap();
